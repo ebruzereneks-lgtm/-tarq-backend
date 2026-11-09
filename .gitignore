@@ -5,3 +5,9 @@
 *.log
 *.bak
 server.js.working.bak
+*.backup.js
+*_BEFORE_*.js
+*_BACKUP.js
+*_BEFORE_*.json
+*.backup
+*.sql

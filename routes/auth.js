@@ -1,18 +1,33 @@
 const crypto = require("crypto");
 const express = require("express");
 const bcrypt = require("bcryptjs");
+const { rateLimit } = require("express-rate-limit");
+
 const { findByEmail, createUser } = require("../store/users");
 const { signToken, requireAuth } = require("../middleware/auth");
 
 const router = express.Router();
+
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Login/register brute-force korumasi.
+// 15 dakika icinde ayni IP adresinden en fazla 10 auth istegi.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: {
+    message: "Too many authentication attempts. Please try again later."
+  }
+});
 
 function publicUser(user) {
   return {
     id: user.id,
     name: user.name,
     email: user.email,
-    createdAt: user.createdAt,
+    createdAt: user.createdAt
   };
 }
 
@@ -32,7 +47,7 @@ function validateCredentials(email, password) {
   return null;
 }
 
-router.post("/register", async (req, res) => {
+router.post("/register", authLimiter, async (req, res) => {
   const { name, email, password } = req.body || {};
   const error = validateCredentials(email, password);
 
@@ -46,25 +61,26 @@ router.post("/register", async (req, res) => {
     return res.status(409).json({
       message: "An account with this email already exists"
     });
-}
+  }
 
   const hashedPassword = await bcrypt.hash(password, 10);
-const user = await createUser({
+
+  const user = await createUser({
     id: crypto.randomUUID(),
     name: typeof name === "string" && name.trim() ? name.trim() : null,
     email: normalizedEmail,
     password: hashedPassword,
-    createdAt: new Date().toISOString(),
+    createdAt: new Date().toISOString()
   });
 
   return res.status(201).json({
     message: "Registration successful",
     user: publicUser(user),
-    token: signToken(user),
+    token: signToken(user)
   });
 });
 
-router.post("/login", async (req, res) => {
+router.post("/login", authLimiter, async (req, res) => {
   const { email, password } = req.body || {};
   const error = validateCredentials(email, password);
 
@@ -72,17 +88,24 @@ router.post("/login", async (req, res) => {
     return res.status(400).json({ message: error });
   }
 
-const user = await findByEmail(String(email).trim().toLowerCase());
-  const passwordMatches = user ? await bcrypt.compare(password, user.password) : false;
+  const user = await findByEmail(
+    String(email).trim().toLowerCase()
+  );
+
+  const passwordMatches = user
+    ? await bcrypt.compare(password, user.password)
+    : false;
 
   if (!user || !passwordMatches) {
-    return res.status(401).json({ message: "Invalid email or password" });
+    return res.status(401).json({
+      message: "Invalid email or password"
+    });
   }
 
   return res.json({
     message: "Login successful",
     user: publicUser(user),
-    token: signToken(user),
+    token: signToken(user)
   });
 });
 
@@ -90,10 +113,14 @@ router.get("/me", requireAuth, async (req, res) => {
   const user = await findByEmail(req.user.email);
 
   if (!user) {
-    return res.status(401).json({ message: "Invalid or expired token" });
+    return res.status(401).json({
+      message: "Invalid or expired token"
+    });
   }
 
-  return res.json({ user: publicUser(user) });
+  return res.json({
+    user: publicUser(user)
+  });
 });
 
 module.exports = router;

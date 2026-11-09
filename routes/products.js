@@ -1,14 +1,20 @@
 const express = require("express");
 const pool = require("../db");
+const { requireAuth } = require("../middleware/auth");
 
 const router = express.Router();
 
+// Public: List and search products
 router.get("/", async (req, res) => {
   try {
-    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const q =
+      typeof req.query.q === "string"
+        ? req.query.q.trim()
+        : "";
 
     if (q) {
       const search = `%${q}%`;
+
       const result = await pool.query(
         `SELECT *
          FROM products
@@ -35,13 +41,18 @@ router.get("/", async (req, res) => {
     return res.json(result.rows);
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ message: "Failed to fetch products" });
+
+    return res.status(500).json({
+      message: "Failed to fetch products"
+    });
   }
 });
 
+// Public: Get one product and its trusted price offers
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
     const productResult = await pool.query(
       `SELECT *
        FROM products
@@ -50,41 +61,72 @@ router.get("/:id", async (req, res) => {
     );
 
     if (productResult.rows.length === 0) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.status(404).json({
+        message: "Product not found"
+      });
     }
 
     const pricesResult = await pool.query(
-      `SELECT pp.*, s.name AS store_name, s.website_url, s.country,
-              s.is_verified, s.verification_status
+      `SELECT
+         pp.*,
+         s.name AS store_name,
+         s.website_url,
+         s.country,
+         s.is_verified,
+         s.verification_status,
+         s.trust_score,
+         s.authenticity_risk
        FROM product_prices pp
-       JOIN stores s ON s.id = pp.store_id
+       JOIN stores s
+         ON s.id = pp.store_id
        WHERE pp.product_id = $1
          AND pp.is_test = FALSE
          AND s.is_test = FALSE
-       ORDER BY pp.price ASC`,
+       ORDER BY
+         s.is_verified DESC,
+         s.trust_score DESC NULLS LAST,
+         pp.price ASC`,
       [id]
     );
 
     return res.json({
       product: productResult.rows[0],
-      prices: pricesResult.rows,
+      prices: pricesResult.rows
     });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ message: "Failed to fetch product" });
+
+    return res.status(500).json({
+      message: "Failed to fetch product"
+    });
   }
 });
 
-router.post("/", async (req, res) => {
+// Protected: Create product
+router.post("/", requireAuth, async (req, res) => {
   try {
-    const { name, brand, category, description, image_url } = req.body || {};
+    const {
+      name,
+      brand,
+      category,
+      description,
+      image_url
+    } = req.body || {};
 
     if (typeof name !== "string" || !name.trim()) {
-      return res.status(400).json({ message: "Product name is required" });
+      return res.status(400).json({
+        message: "Product name is required"
+      });
     }
 
     const result = await pool.query(
-      `INSERT INTO products (name, brand, category, description, image_url)
+      `INSERT INTO products (
+         name,
+         brand,
+         category,
+         description,
+         image_url
+       )
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
       [
@@ -92,33 +134,47 @@ router.post("/", async (req, res) => {
         brand || null,
         category || null,
         description || null,
-        image_url || null,
+        image_url || null
       ]
     );
 
     return res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ message: "Failed to create product" });
+
+    return res.status(500).json({
+      message: "Failed to create product"
+    });
   }
 });
 
-router.put("/:id", async (req, res) => {
+// Protected: Update product
+router.put("/:id", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, brand, category, description, image_url } = req.body || {};
+
+    const {
+      name,
+      brand,
+      category,
+      description,
+      image_url
+    } = req.body || {};
 
     if (typeof name !== "string" || !name.trim()) {
-      return res.status(400).json({ message: "Product name is required" });
+      return res.status(400).json({
+        message: "Product name is required"
+      });
     }
 
     const result = await pool.query(
       `UPDATE products
-       SET name = $1,
-           brand = $2,
-           category = $3,
-           description = $4,
-           image_url = $5
+       SET
+         name = $1,
+         brand = $2,
+         category = $3,
+         description = $4,
+         image_url = $5
        WHERE id = $6
        RETURNING *`,
       [
@@ -127,39 +183,51 @@ router.put("/:id", async (req, res) => {
         category || null,
         description || null,
         image_url || null,
-        id,
+        id
       ]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.status(404).json({
+        message: "Product not found"
+      });
     }
 
     return res.json(result.rows[0]);
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ message: "Failed to update product" });
+
+    return res.status(500).json({
+      message: "Failed to update product"
+    });
   }
 });
 
-router.delete("/:id", async (req, res) => {
+// Protected: Delete product
+router.delete("/:id", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
     const result = await pool.query(
       `DELETE FROM products
        WHERE id = $1
        RETURNING id`,
-      [id]
+      [req.params.id]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.status(404).json({
+        message: "Product not found"
+      });
     }
 
-    return res.json({ message: "Product deleted successfully" });
+    return res.json({
+      message: "Product deleted successfully"
+    });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ message: "Failed to delete product" });
+
+    return res.status(500).json({
+      message: "Failed to delete product"
+    });
   }
 });
 
