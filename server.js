@@ -188,10 +188,46 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(
     `Server listening on port ${PORT}`
   );
 });
 
+let shuttingDown = false;
 
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  logger.info({ signal }, "Graceful shutdown started");
+
+  const timer = setTimeout(() => {
+    logger.error({ signal }, "Graceful shutdown timed out");
+    process.exit(1);
+  }, 10000);
+
+  timer.unref();
+
+  server.close(async (error) => {
+    if (error) {
+      logger.error({ err: error, signal }, "HTTP server shutdown failed");
+      process.exit(1);
+    }
+
+    try {
+      await pool.end();
+      logger.info({ signal }, "Graceful shutdown completed");
+      process.exit(0);
+    } catch (dbError) {
+      logger.error(
+        { err: dbError, signal },
+        "PostgreSQL pool shutdown failed"
+      );
+      process.exit(1);
+    }
+  });
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
